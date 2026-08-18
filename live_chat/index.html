@@ -88,6 +88,21 @@
  *      giftImage.sources[].url — é dessa URL que sai o giftSlug.
  */
 
+/*
+ * O observador tira o videoId do parametro ?v= da propria URL, e o parser do mod EXIGE
+ * esse campo em envelopes de evento — sem ele, todo presente e recusado com 422 e some
+ * sem aparecer no log. STATUS e DIAGNOSTIC passam, porque nao carregam videoId, o que
+ * fazia o teste parecer que estava funcionando.
+ *
+ * replaceState acerta a URL sem recarregar a pagina, e roda antes de o mod injetar o
+ * observador (a injecao acontece no onLoadEnd).
+ */
+if (!new URL(location.href).searchParams.get('v')) {
+  const url = new URL(location.href);
+  url.searchParams.set('v', 'SIMULADOR01');
+  history.replaceState({}, '', url);
+}
+
 const ASSETS = 'https://www.gstatic.com/youtube/img/pdg/gift/assets';
 
 // slug do YouTube -> rótulo em inglês, no formato que o chat monta.
