@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Simulador de chat — LiveCraft Bridge</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 14px/1.45 system-ui, sans-serif;
+    background: #0f0f0f; color: #f1f1f1; height: 100vh;
+    display: grid; grid-template-rows: auto 1fr;
+  }
+  #painel {
+    padding: 10px 12px; background: #181820; border-bottom: 1px solid #33334a;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: end;
+  }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #a8a8b8; }
+  select, input { background: #0f0f14; color: #f1f1f1; border: 1px solid #44445c;
+    border-radius: 4px; padding: 5px 7px; font: inherit; }
+  input[type=number] { width: 78px; }
+  button { background: #7050c8; color: #fff; border: 0; border-radius: 4px;
+    padding: 7px 13px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.sec { background: #33334a; }
+  button:disabled { opacity: .45; cursor: default; }
+  #estado { font-size: 12px; color: #a8a8b8; margin-left: auto; text-align: right; }
+  #estado b { color: #70e090; }
+  /* O observador procura por 'yt-live-chat-item-list-renderer #items'. */
+  yt-live-chat-item-list-renderer { display: block; overflow-y: auto; padding: 6px 10px; }
+  #items { display: flex; flex-direction: column; gap: 6px; }
+  yt-live-chat-text-message-renderer, yt-gift-message-view-model {
+    display: block; padding: 5px 7px; border-radius: 5px; background: #1b1b24;
+  }
+  yt-gift-message-view-model { background: #2a2136; border-left: 3px solid #b06cff; }
+  .autor { color: #8ab4f8; font-weight: 600; margin-right: 6px; }
+  .combo { color: #ffd76a; font-weight: 700; margin-left: 6px; }
+  yt-gift-message-view-model img { height: 26px; vertical-align: middle; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<div id="painel">
+  <label>Presente
+    <select id="presente"></select>
+  </label>
+  <label>Intervalo (ms)
+    <input id="intervalo" type="number" value="1500" min="100" step="100">
+  </label>
+  <label>Quantidade
+    <input id="quantidade" type="number" value="1" min="1" max="60">
+  </label>
+  <label>Modo
+    <select id="modo">
+      <option value="separado">Presentes separados</option>
+      <option value="combo">Combo (mesmo nó cresce)</option>
+    </select>
+  </label>
+  <label>Ruído de chat
+    <select id="ruido">
+      <option value="1">ligado</option>
+      <option value="0">desligado</option>
+    </select>
+  </label>
+  <button id="enviar">Enviar 1x</button>
+  <button id="auto" class="sec">Iniciar automático</button>
+  <button id="limpar" class="sec">Limpar</button>
+  <div id="estado">parado</div>
+</div>
+
+<yt-live-chat-item-list-renderer>
+  <div id="items"></div>
+</yt-live-chat-item-list-renderer>
+
+<script>
+/*
+ * Simulador do chat ao vivo do YouTube para testar a ponte sem depender de
+ * presentes reais.
+ *
+ * A página NÃO fala com o mod. Ela apenas reconstrói o DOM que o YouTube produz,
+ * e o observador injetado pelo mod raspa esta página como raspa a original. Por
+ * isso o teste cobre o pipeline inteiro — leitura do DOM, extração do slug,
+ * contagem de combo, deduplicação e execução — e não só a última etapa.
+ *
+ * Os três pontos que o observador realmente lê:
+ *   1. o contêiner  'yt-live-chat-item-list-renderer #items';
+ *   2. nós de nome  'yt-gift-message-view-model';
+ *   3. a propriedade .data do nó, onde ficam giftImageA11yLabel e
+ *      giftImage.sources[].url — é dessa URL que sai o giftSlug.
+ */
+
+const ASSETS = 'https://www.gstatic.com/youtube/img/pdg/gift/assets';
+
+// slug do YouTube -> rótulo em inglês, no formato que o chat monta.
+const PRESENTES = [
+  ['treat', 'Treat'], ['hiding', 'Hiding'], ['lol', 'Laughing disco'],
+  ['gaming_capybara', 'Gaming capybara'], ['soccerball', 'Soccerball'],
+  ['gold_coin', 'Gold coin'], ['sad_chihuahua', 'Sad chihuahua'],
+  ['tamo_junto', 'Tamo junto'], ['ramen_bowl', 'Ramen bowl'],
+  ['watermelon', 'Watermelon'], ['mic_drop', 'Mic drop'], ['gratidao', 'Gratidao'],
+  ['silver_star', 'Silver star'], ['sunshine', 'Sunshine'],
+  ['capybara_samba', 'Capybara samba'], ['press_f', 'Press f'], ['nubao', 'Nubao'],
+  ['blowfish', 'Blowfish'], ['tmj', 'Tmj'], ['power_potion', 'Power potion'],
+  ['controller', 'Controller'], ['air_travel', 'Air travel'], ['island', 'Island'],
+  ['corgi', 'Corgi'], ['sparkles', 'Sparkles'], ['o_que', 'O que'],
+  ['golaco', 'Golaco'], ['pug_nap', 'Pug nap'], ['gambiarra', 'Gambiarra'],
+  ['goooool', 'Goooool'], ['chili', 'Chili'], ['100', '100'], ['x1', 'X1'],
+  ['bumblebee', 'Bumblebee'], ['guitar', 'Guitar'], ['hound', 'Hound'],
+  ['headphones', 'Headphones'], ['tube_dancer', 'Tube dancer'], ['sushi', 'Sushi'],
+  ['sand_castle', 'Sand castle'], ['spill_the_tea', 'Spill the tea'],
+  ['biscuit_tin', 'Biscuit tin'], ['hotpot', 'Hotpot'], ['high_five', 'High five'],
+  ['sports_car', 'Sports car'], ['limo', 'Limo'], ['ball_party', 'Ball party'],
+  ['clapping_seal', 'Clapping seal'], ['goat_trophy', 'Goat trophy'],
+  ['finger_heart', 'Finger heart'], ['six_seven', 'Six seven'],
+  ['seal_of_approval', 'Seal of approval'], ['pastel', 'Pastel'],
+  ['glass_rose', 'Glass rose'], ['disco_ball', 'Disco ball'], ['hi', 'Hi'],
+  ['trophy_cake', 'Trophy cake'],
+];
+
+const FRASES = ['oi gente', 'boa live', 'kkkkk', 'manda mais', 'top demais',
+  'primeiro!', 'que susto', 'vai vai vai', ':D', 'salve', 'que isso mano'];
+const NOMES = ['@teste_um', '@viewer42', '@axocalii', '@fulano-x9', '@convidada7'];
+
+const $ = id => document.getElementById(id);
+const items = $('items');
+const sorteio = lista => lista[Math.floor(Math.random() * lista.length)];
+
+let sequencia = 0;
+let timer = null;
+let enviados = 0;
+
+// Preenche o seletor de presentes.
+for (const [slug, rotulo] of PRESENTES) {
+  const opcao = document.createElement('option');
+  opcao.value = slug;
+  opcao.textContent = `${rotulo}  (${slug})`;
+  $('presente').appendChild(opcao);
+}
+
+function rolarParaFim() {
+  const caixa = document.querySelector('yt-live-chat-item-list-renderer');
+  caixa.scrollTop = caixa.scrollHeight;
+}
+
+function mensagemDeChat() {
+  const no = document.createElement('yt-live-chat-text-message-renderer');
+  const id = `sim-msg-${++sequencia}`;
+  no.id = id;
+  no.innerHTML = `<span id="author-name" class="autor"></span><span id="message"></span>`;
+  no.querySelector('#author-name').textContent = sorteio(NOMES);
+  no.querySelector('#message').textContent = sorteio(FRASES);
+  // O observador também lê a propriedade .data quando existe.
+  no.data = { id, message: { runs: [{ text: no.querySelector('#message').textContent }] } };
+  items.appendChild(no);
+  rolarParaFim();
+}
+
+/**
+ * Cria (ou atualiza) um nó de presente igual ao do YouTube.
+ *
+ * Em combo, o MESMO nó é reaproveitado e o total cresce nele — que é exatamente
+ * como o YouTube agrupa presentes repetidos, e o caso que mais quebrou até aqui.
+ */
+function noDePresente(slug, rotulo, autor, total, noExistente) {
+  const no = noExistente ?? document.createElement('yt-gift-message-view-model');
+  const id = noExistente?.dataset.simId ?? `sim-gift-${++sequencia}`;
+  no.dataset.simId = id;
+
+  const texto = total > 1 ? `sent ${rotulo} x${total}` : `sent ${rotulo}`;
+  const url = `//www.gstatic.com/youtube/img/pdg/gift/assets/${slug}.png=w480-h480`;
+
+  no.innerHTML =
+    `<span class="autor"></span><span class="texto"></span>` +
+    (total > 1 ? `<span class="combo">x${total}</span>` : '') +
+    `<img alt="${rotulo}" src="${ASSETS}/${slug}.png">`;
+  no.querySelector('.autor').textContent = autor;
+  no.querySelector('.texto').textContent = texto;
+
+  // O coração do teste: o mesmo formato de dados que o YouTube expõe no nó.
+  no.data = {
+    id,
+    giftImageA11yLabel: `${autor} sent a gift, ${rotulo}`,
+    text: { content: texto },
+    giftImage: {
+      sources: [
+        { url, width: 480, height: 480 },
+        { url: url.replace('w480-h480', 'w640-h640'), width: 640, height: 640 },
+      ],
+    },
+  };
+
+  if (!noExistente) {
+    items.appendChild(no);
+  }
+  rolarParaFim();
+  return no;
+}
+
+function enviarPresente() {
+  const slug = $('presente').value;
+  const rotulo = PRESENTES.find(p => p[0] === slug)[1];
+  const autor = sorteio(NOMES);
+  const quantidade = Math.max(1, Number($('quantidade').value) || 1);
+
+  if ($('modo').value === 'separado') {
+    for (let i = 0; i < quantidade; i++) {
+      noDePresente(slug, rotulo, sorteio(NOMES), 1, null);
+    }
+    enviados += quantidade;
+    return;
+  }
+
+  // Combo: um nó só, que cresce de 1 até a quantidade, um degrau por vez.
+  let no = null;
+  let passo = 0;
+  const crescer = () => {
+    passo++;
+    no = noDePresente(slug, rotulo, autor, passo, no);
+    enviados++;
+    atualizarEstado();
+    if (passo < quantidade) {
+      setTimeout(crescer, 400);
+    }
+  };
+  crescer();
+}
+
+function atualizarEstado() {
+  $('estado').innerHTML = timer
+    ? `<b>enviando</b> · ${enviados} presentes`
+    : `parado · ${enviados} presentes`;
+}
+
+$('enviar').onclick = () => { enviarPresente(); atualizarEstado(); };
+
+$('auto').onclick = () => {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+    $('auto').textContent = 'Iniciar automático';
+  } else {
+    const intervalo = Math.max(100, Number($('intervalo').value) || 1500);
+    timer = setInterval(() => {
+      if ($('ruido').value === '1') mensagemDeChat();
+      enviarPresente();
+    }, intervalo);
+    $('auto').textContent = 'Parar';
+  }
+  atualizarEstado();
+};
+
+$('limpar').onclick = () => { items.innerHTML = ''; enviados = 0; atualizarEstado(); };
+
+// Ruído de fundo constante: é ele que reproduz o chat movimentado que travou a
+// sincronização inicial antes do teto de 8s. Sem isso, o teste fica fácil demais.
+setInterval(() => { if ($('ruido').value === '1' && !timer) mensagemDeChat(); }, 900);
+
+for (let i = 0; i < 8; i++) mensagemDeChat();
+atualizarEstado();
+</script>
+</body>
+</html>
