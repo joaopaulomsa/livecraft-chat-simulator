@@ -210,10 +210,23 @@ function noDePresente(slug, rotulo, autor, total, noExistente) {
   return no;
 }
 
+// Um combo leva tempo para crescer. Sem estas duas travas ele vira spam impossível de
+// parar: o setTimeout da corrente sobrevivia ao botão Parar, e o disparo automático
+// começava uma corrente nova antes de a anterior terminar, empilhando indefinidamente.
+let comboEmAndamento = false;
+let timeoutCombo = null;
+
+function cancelarCombo() {
+  if (timeoutCombo !== null) {
+    clearTimeout(timeoutCombo);
+    timeoutCombo = null;
+  }
+  comboEmAndamento = false;
+}
+
 function enviarPresente() {
   const slug = $('presente').value;
   const rotulo = PRESENTES.find(p => p[0] === slug)[1];
-  const autor = sorteio(NOMES);
   const quantidade = Math.max(1, Number($('quantidade').value) || 1);
 
   if ($('modo').value === 'separado') {
@@ -224,16 +237,25 @@ function enviarPresente() {
     return;
   }
 
-  // Combo: um nó só, que cresce de 1 até a quantidade, um degrau por vez.
+  // Só um combo por vez: o automático espera o atual acabar.
+  if (comboEmAndamento) {
+    return;
+  }
+  comboEmAndamento = true;
+
+  const autor = sorteio(NOMES);
   let no = null;
   let passo = 0;
   const crescer = () => {
+    timeoutCombo = null;
     passo++;
     no = noDePresente(slug, rotulo, autor, passo, no);
     enviados++;
     atualizarEstado();
     if (passo < quantidade) {
-      setTimeout(crescer, 400);
+      timeoutCombo = setTimeout(crescer, 400);
+    } else {
+      comboEmAndamento = false;
     }
   };
   crescer();
@@ -251,6 +273,7 @@ $('auto').onclick = () => {
   if (timer) {
     clearInterval(timer);
     timer = null;
+    cancelarCombo();          // Parar tem que parar de verdade, inclusive o combo em curso.
     $('auto').textContent = 'Iniciar automático';
   } else {
     const intervalo = Math.max(100, Number($('intervalo').value) || 1500);
@@ -263,7 +286,12 @@ $('auto').onclick = () => {
   atualizarEstado();
 };
 
-$('limpar').onclick = () => { items.innerHTML = ''; enviados = 0; atualizarEstado(); };
+$('limpar').onclick = () => {
+  cancelarCombo();
+  items.innerHTML = '';
+  enviados = 0;
+  atualizarEstado();
+};
 
 // Ruído de fundo constante: é ele que reproduz o chat movimentado que travou a
 // sincronização inicial antes do teto de 8s. Sem isso, o teste fica fácil demais.
