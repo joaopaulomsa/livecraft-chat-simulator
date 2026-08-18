@@ -129,6 +129,10 @@ const PRESENTES = [
   ['seal_of_approval', 'Seal of approval'], ['pastel', 'Pastel'],
   ['glass_rose', 'Glass rose'], ['disco_ball', 'Disco ball'], ['hi', 'Hi'],
   ['trophy_cake', 'Trophy cake'],
+  // Estes dois nao tem slug conhecido na CDN do YouTube. Vao sem giftImage, entao o mod
+  // nao consegue extrair giftSlug e precisa casar pelo NOME — o caminho de reserva, que
+  // tambem merece ser testado.
+  [null, 'Patinho'], [null, 'Pavê no ritmo'],
 ];
 
 const FRASES = ['oi gente', 'boa live', 'kkkkk', 'manda mais', 'top demais',
@@ -143,12 +147,32 @@ let sequencia = 0;
 let timer = null;
 let enviados = 0;
 
-// Preenche o seletor de presentes.
+const TODOS = '__todos__';
+
+// Preenche o seletor. A primeira opção percorre o catálogo inteiro, um presente por envio.
+const opcaoTodos = document.createElement('option');
+opcaoTodos.value = TODOS;
+opcaoTodos.textContent = `★ Todos, em sequência (${PRESENTES.length})`;
+$('presente').appendChild(opcaoTodos);
+
 for (const [slug, rotulo] of PRESENTES) {
   const opcao = document.createElement('option');
-  opcao.value = slug;
-  opcao.textContent = `${rotulo}  (${slug})`;
+  opcao.value = slug ?? `nome:${rotulo}`;
+  opcao.textContent = slug ? `${rotulo}  (${slug})` : `${rotulo}  (sem slug — casa por nome)`;
   $('presente').appendChild(opcao);
+}
+
+// Rotação do modo "todos": avança um presente por envio e dá a volta no fim.
+let indiceRotacao = 0;
+
+function presenteEscolhido() {
+  const valor = $('presente').value;
+  if (valor === TODOS) {
+    const par = PRESENTES[indiceRotacao % PRESENTES.length];
+    indiceRotacao++;
+    return par;
+  }
+  return PRESENTES.find(p => (p[0] ?? `nome:${p[1]}`) === valor);
 }
 
 function rolarParaFim() {
@@ -181,12 +205,11 @@ function noDePresente(slug, rotulo, autor, total, noExistente) {
   no.dataset.simId = id;
 
   const texto = total > 1 ? `sent ${rotulo} x${total}` : `sent ${rotulo}`;
-  const url = `//www.gstatic.com/youtube/img/pdg/gift/assets/${slug}.png=w480-h480`;
 
   no.innerHTML =
     `<span class="autor"></span><span class="texto"></span>` +
     (total > 1 ? `<span class="combo">x${total}</span>` : '') +
-    `<img alt="${rotulo}" src="${ASSETS}/${slug}.png">`;
+    (slug ? `<img alt="${rotulo}" src="${ASSETS}/${slug}.png">` : '');
   no.querySelector('.autor').textContent = autor;
   no.querySelector('.texto').textContent = texto;
 
@@ -195,13 +218,18 @@ function noDePresente(slug, rotulo, autor, total, noExistente) {
     id,
     giftImageA11yLabel: `${autor} sent a gift, ${rotulo}`,
     text: { content: texto },
-    giftImage: {
+  };
+
+  // Sem slug não há giftImage: o mod não extrai giftSlug e cai no casamento por nome.
+  if (slug) {
+    const url = `//www.gstatic.com/youtube/img/pdg/gift/assets/${slug}.png=w480-h480`;
+    no.data.giftImage = {
       sources: [
         { url, width: 480, height: 480 },
         { url: url.replace('w480-h480', 'w640-h640'), width: 640, height: 640 },
       ],
-    },
-  };
+    };
+  }
 
   if (!noExistente) {
     items.appendChild(no);
@@ -225,8 +253,8 @@ function cancelarCombo() {
 }
 
 function enviarPresente() {
-  const slug = $('presente').value;
-  const rotulo = PRESENTES.find(p => p[0] === slug)[1];
+  const [slug, rotulo] = presenteEscolhido();
+  ultimoRotulo = rotulo;
   const quantidade = Math.max(1, Number($('quantidade').value) || 1);
 
   if ($('modo').value === 'separado') {
@@ -261,10 +289,16 @@ function enviarPresente() {
   crescer();
 }
 
+let ultimoRotulo = '';
+
 function atualizarEstado() {
-  $('estado').innerHTML = timer
+  const rodada = $('presente').value === TODOS
+    ? ` · ${indiceRotacao % PRESENTES.length || PRESENTES.length}/${PRESENTES.length}`
+    : '';
+  const atual = ultimoRotulo ? ` · último: ${ultimoRotulo}` : '';
+  $('estado').innerHTML = (timer
     ? `<b>enviando</b> · ${enviados} presentes`
-    : `parado · ${enviados} presentes`;
+    : `parado · ${enviados} presentes`) + rodada + atual;
 }
 
 $('enviar').onclick = () => { enviarPresente(); atualizarEstado(); };
@@ -290,8 +324,13 @@ $('limpar').onclick = () => {
   cancelarCombo();
   items.innerHTML = '';
   enviados = 0;
+  indiceRotacao = 0;
+  ultimoRotulo = '';
   atualizarEstado();
 };
+
+// Trocar de presente reinicia a volta, para o contador não mentir.
+$('presente').onchange = () => { indiceRotacao = 0; atualizarEstado(); };
 
 // Ruído de fundo constante: é ele que reproduz o chat movimentado que travou a
 // sincronização inicial antes do teto de 8s. Sem isso, o teste fica fácil demais.
